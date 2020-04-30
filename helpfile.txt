@@ -1,0 +1,6 @@
+This is loading from helpfile.txt
+and is being inserted into some automatically created labels
+which are being displayed in an programmatically generated window 
+which is spawned into existence from the help task 
+
+It will be very nice if this works. 
