@@ -1,7 +1,7 @@
 /* 
 
  Text Mode UI
- v0.12
+ v0.13
  Tom Dyer flicker@anduin.net
  2020
  
@@ -1649,7 +1649,7 @@ prior to adding them to a window, windowmanager, task etc.
     use arg obj 
 
     if obj~isnil = .true then do 
-        "SanityChecker failed on" obj
+        say "SanityChecker failed on" obj
         return .false
     end 
 
