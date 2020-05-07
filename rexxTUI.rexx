@@ -97,7 +97,11 @@ version 0.1
  
  sliders2 = .slider~new(10,5,400,4,20,30) /* initial value 10, range 5-400 */
  
- 
+ sliders2ro = .slider~new(0,0,100,6,20,50)  /* a read only slider */
+ sliders2ro~readonly=.true
+ say sliders2ro~data 
+   
+ label3s2 = .label~new("", 4,3) 
  
  
  /*
@@ -126,12 +130,14 @@ version 0.1
  helpwintask~key=.key~new("H")
  helpwintask~key~alt=.true
 
- 
-  
  helpwintask2 = .CreateHelpWindowTask~new(win) 
  helpwintask2~key=.key~new
  helpwintask2~key~fn1=.true
  
+ 
+ ProgTask = .ProgressTask~new(secondwin, sliders2ro)
+ ProgTask~key=.key~new
+ ProgTask~key~fn2=.true
  
  /* 
  make some buttons which have tasks assigned to them.
@@ -154,6 +160,17 @@ version 0.1
   
  /* add all the widgets to the windows */
  
+menubar = .menu~new(wm) 
+menuitem0 = .menuitem~new("Screen 1",.nil) 
+menuitem1 = .menuitem~new("Screen 1", okButton~task)
+menuitem2 = .menuitem~new("Screen 1", okButton2~task)
+menuitem3 = .menuitem~new("Help" , helpwintask)
+menubar~add(menuitem0)
+menuitem0~add(menuitem1)
+menuitem0~add(menuitem2)
+menuitem0~add(menuitem3)
+
+ 
  /* the first window */
  
  win~add(label1)
@@ -165,6 +182,7 @@ version 0.1
  win~add(okButton)
  win~add(clearButton)
  win~add(fieldhelplabel)
+ win~add(menubar)
  
  
  /* and the second window */
@@ -174,8 +192,12 @@ version 0.1
  secondwin~add(input1s2)
  secondwin~add(input2s2)
  secondwin~add(sliders2)
+ secondwin~add(sliders2ro)
  secondwin~add(okButton2)
  secondwin~add(print2)
+ secondwin~add(label3s2)
+ secondwin~add(menubar)
+
  
   
  /* including something illegal here */
@@ -202,6 +224,7 @@ version 0.1
  wmdms~put(input1S2,"input1S2")
  wmdms~put(input2S2,"input2S2")
  wmdms~put(sliders2,"slider2")
+ wmdms~put(sliders2ro,"sliders2ro")
  
  /*
  create a virtual screen and add it to the wm 
@@ -227,7 +250,9 @@ version 0.1
  wm~add(task1)
  wm~add(task2)
  wm~add(helpwintask)
+ wm~add(ProgTask)
  wm~add(helpwintask2)
+ 
  
  /* 
  add the data management serviec to the window manager 
@@ -242,18 +267,17 @@ version 0.1
  
  wm~logger~log( "Window Manager is shutdown",1)
 
-do i = 1 to 3 
-    say "shutdown " 
-    call syssleep(1)
-end 
+ 
+ 
+    do i = 1 to 3 
+        say "shutdown " 
+        call syssleep(1)
+    end 
 
-/* 
-ensure that this thread dies by killing all rexx running, rather brutal but this is a test application isn't it.
-*/
-
-pid=SysQueryProcess("pid")
-
-"kill -9" pid
+    /* 
+        ensure that this thread dies by killing all rexx running, rather brutal but this is a test application isn't it.
+    */
+    wm~forceWMShutdown()
 
 /* we are done */
 exit

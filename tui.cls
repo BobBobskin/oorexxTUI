@@ -37,15 +37,17 @@
 ::attribute activewindow
 ::attribute keybindabletasks
 ::attribute wmdms /* data management service for window manager, provides some validation etc */ 
+::attribute wmbtm /* window manager background task management service */ 
 
 /*
 Sets up a logger, and some necessary lists 
 */
 
 ::method init
-   
+
+  self~running= .true /* ensure system knows it is running */ 
+  
   logger=.logger~new
-   
   screen=.screen~new
   
   self~window = .list~new
@@ -58,30 +60,27 @@ Sets up a logger, and some necessary lists
   keyboard= .keyboard~new()
   
   keyboard~add(self) /* gives itself to keyboard */ 
-  keyboard~add(self~logger) /* gives it's logger to keyboard */ 
+  keyboard~add(self~logger) /* gives its logger to keyboard */ 
   
   
   self~add(keyboard) /* and ensures that it has the keyboard stored in it */
+  
+  
 
   
   /*
    This is the main routine, it 
   */
 
-::method run unguarded
-    
-    
-    self~gotoWindow(0)
-    self~findfocusable /* finds the focused item on the curren window */
-    
-    self~drawwindows   /* kick off drawing the screen */
- 
-    self~logger~log("Within the WM code, about to poll keyboard",1)
-    
-    self~keyboard~poll 
-    
-    self~logger~log("We have returned from polling the keyboard",1 )
-
+::method run
+    if self~running = .true then do
+        self~gotoWindow(0)
+        self~findfocusable /* finds the focused item on the curren window */
+        self~drawwindows   /* kick off drawing the screen */
+        self~logger~log("Within the WM code, about to poll keyboard",1)
+        self~keyboard~poll 
+        self~logger~log("We have returned from polling the keyboard",1 )
+    end 
  return
  
  /*
@@ -96,55 +95,81 @@ Sets up a logger, and some necessary lists
  /* Note the logger might not yet be installed at the time of runnig these commands */
  
  ::method add
- use arg obj 
- if .SanityChecker~new~check(obj ,self) = .false then return
- 
+    use arg obj 
+    if .SanityChecker~new~check(obj ,self) = .false then return
+    
  /*
  Install a temporary logger if there is none 
  */
- 
- if .SanityChecker~new~isSet(self,"logger") = .false then do 
-    l = .logger~new() 
+    if .SanityChecker~new~isSet(self,"logger") = .false then do 
+            l = .logger~new() 
+        end 
+    else 
+        do 
+            l = self~logger
     end 
-    else do 
-    l = self~logger
- end 
  
- if obj~isInstanceOf(.window) = .true then do
-    l~log("added Windows",1)
-    self~addWindow(obj)
- end
-
- if obj~isInstanceOf(.keybindable) = .true  then do
-    l~log("added Keybindable task",1)
-    self~addKeyBindableTask(obj)
- end 
-  
-  if obj~isInstanceOf(.WMDataManagementService) = .true  then do
-    l~log("added WMDMS",1)
-    self~wmdms = obj
- end 
+ /*
+    Now a select which will pick what to do with the item to add
+ */ 
+    select
+        when obj~isInstanceOf(.window) = .true then do
+            self~addWindow(obj)
+            l~log("added Windows",1)
+        end
+        when obj~isInstanceOf(.keybindable) = .true  then do
+            self~addKeyBindableTask(obj)
+            l~log("added Keybindable task",1)
+        end 
+        when obj~isInstanceOf(.WMDataManagementService) = .true  then do
+            self~wmdms = obj
+            l~log("added WMDMS",1)
+        end
+        when obj~isInstanceOf(.WMBackgroundTaskManager) = .true  then do
+            self~wmbtm = obj
+            l~log("added WMBTM",1)
+        end
+        when obj~isInstanceOf(.screen) = .true then do 
+            self~screen = obj
+            l~log("added Screen",1)
+        end
+        when obj~isInstanceOf(.logger) = .true then do 
+            /* Too early to get a logger */
+            self~logger = obj
+            self~logger~log("Switched from temporarly logger to installed logger",1)
+        end 
+        when obj~isInstanceOf(.keyboard) = .true  then do
+            self~keyboard = obj
+            l~log("added Keyboard",1)
+        end 
+        otherwise do 
+            nop
+        end
+    end 
+        
  
- if obj~isInstanceOf(.screen) = .true then do 
-    l~log("added Screen",1)
-    self~screen = obj
- end 
+ ::method notifyShutdownNow 
+    self~running = .false
  
  
- if obj~isInstanceOf(.logger) = .true then do 
-    /* Too early to get a logger */
-    self~logger = obj
-    self~logger~log("Switched from temporarly logger to installed logger",1)
- end 
+ ::method forceWMShutdown 
+    self~logger~log("forceWMShutdown Running",1)
+    
+    self~notifyShutdownNow
  
- if obj~isInstanceOf(.keyboard) = .true  then do
-    l~log("added Keyboard",1)
-    self~keyboard = obj
- end 
+    if self~running = .false then do 
+        if .SanityChecker~new~isSet(self,"screen") = .true then do 
+            self~logger~log("forceWMShutdown has screen",1)
+            pid=SysQueryProcess("pid")
+            self~logger~log("Killing pid" pid,1)
+            Say "Forcing Kill on" pid 
+            "kill -9" pid
+        end 
+    end
  
  
- ::method addKeyBindableTask
- use arg keyBindableTask 
+ ::method addKeyBindableTask 
+    use arg keyBindableTask 
  
     illegaltobindkey1 = .key~new("[")
     illegaltobindkey1~alt=.true
@@ -162,36 +187,38 @@ Sets up a logger, and some necessary lists
         
     end
   
- ::method addWindow
- use arg window 
- if .SanityChecker~new~check(window,self) = .false then return
- window~screen = self~screen
- window~wm=self 
- self~window~insert(window)
- if self~window~items=1 then do 
-    self~activewindow = 0
- end 
- 
- ::method gotoWindow
- use arg obj
-  
-  select 
-    when obj~isInstanceOf(.Window) then do 
-        do i = 0 to self~window~items -1 
-            if obj = self~window~at(i) then windowNumber = i 
-        end 
+ ::method addWindow 
+    use arg window 
+    if .SanityChecker~new~check(window,self) = .false then return
     
+    window~screen = self~screen
+    window~wm=self 
+    self~window~insert(window)
+    
+    if self~window~items=1 then do 
+        self~activewindow = 0
     end 
-    otherwise do 
-      windowNumber = obj 
-      end 
-    end 
-  self~screen~majorchange = .true 
-  self~activewindow= windowNumber
-  self~findfocusable
+ 
+ ::method gotoWindow 
+    use arg obj
+    
+    select 
+        when obj~isInstanceOf(.Window) then do 
+            do i = 0 to self~window~items -1 
+                if obj = self~window~at(i) then windowNumber = i 
+            end 
+        
+        end 
+        otherwise do 
+            windowNumber = obj 
+        end 
+    end /* end select */
+    self~screen~majorchange = .true 
+    self~activewindow= windowNumber
+    self~findfocusable
   
 
-::method findfocusable
+::method findfocusable 
   self~focusableitems = .list~new 
   
   if .SanityChecker~new~isSet(self~window~at(self~activewindow),"objects") = .true then do 
@@ -207,11 +234,8 @@ Sets up a logger, and some necessary lists
         self~activeitem~validator~displayValidatorText
     end 
   end 
-  
-  
 
-
-::method nextFocus
+::method nextFocus 
     self~logger~log("Changing to next focus" self~focusableitems~items,0)
 
   do i = 0 to self~focusableitems~items -1 
@@ -233,71 +257,74 @@ Sets up a logger, and some necessary lists
   end 
   
 
- 
-
-::method drawwindows 
+::method drawwindows unguarded
     do i = 0 to self~window~items -1 
         self~window~at(self~activewindow)~draw
     end
 
 
 ::method sendkey 
- use arg key 
- self~logger~log("WM - key pressed was" key~detail,0)
+    use arg key 
+    self~logger~log("WM - key pressed was" key~detail,0)
 
- select 
-    when key~altcmd= .true & upper(key~value) = "X" then do /* Alt X shutdown key */ 
-        self~keyboard~running= .false
-        self~screen~running = .false 
-        self~logger~log("shutdown called",0)
-    end
-    when key~altcmd= .true & upper(key~value) = "R" then do /* Alt R redraw */
-        self~drawwindows 
-        self~screen~draw
-    end
-    when key~tab=.true then do /* Tab next field */ 
-        self~nextFocus
-    end 
-    
-    when key~altcmd= .true then do /* any other alt key is sent to keybindable tasks */
-        /* 
-        send it to anything with global keybindability on alt 
-        */ 
-        do i = 0 to self~keybindabletasks~items -1 
-            self~logger~log("WM sending keystroke to keybindabletask",2)
-            self~keybindabletasks~at(i)~sendkey(key)
+    select 
+        when key~altcmd= .true & upper(key~value) = "X" then do /* Alt X shutdown key */ 
+            self~keyboard~running= .false
+            self~screen~running = .false 
+            self~logger~log("shutdown called",0)
+        end
+        when key~altcmd= .true & upper(key~value) = "R" then do /* Alt R redraw */
+            self~drawwindows 
+            self~screen~draw
+        end
+        when key~tab=.true then do /* Tab next field */ 
+            self~nextFocus
         end 
-    end 
-    otherwise 
-            self~activeitem~sendkey(key)
-    end
-    
-    /* 
-       then anything else to the active item on screen
-    */
-    
-    self~drawwindows 
+        when key~altcmd= .true then do /* any other alt key is sent to keybindable tasks */
+            /* 
+            send it to anything with global keybindability on alt 
+            */ 
+            do i = 0 to self~keybindabletasks~items -1 
+                self~logger~log("WM sending keystroke to keybindabletask",2)
+                self~keybindabletasks~at(i)~sendkey(key)
+            end 
+        end 
+        otherwise 
+                self~activeitem~sendkey(key)
+        end
+        
+        /* 
+        then anything else to the active item on screen
+        */
+        
+        self~drawwindows 
+
+/* 
+    The background task manager, registers background tasks, starts them on request, reports back their status 
+*/ 
+::class WMBackgroundTaskManager public subclass Directory 
+
 
     
+    
     /* 
- WindowManager Data Management Service
- Provides information on whether fields and windows have been displayed, whether they validated, and allows the registration of certain data requirements
- to help for timely development 
- at the moment it's just a directory of fields 
+    WindowManager Data Management Service
+    Provides information on whether fields and windows have been displayed, whether they validated, and allows the registration of certain data requirements
+    to help for timely development at the moment it is  just a directory of fields 
+    but this will be extensively improved 
 */
 
  
 ::class WMDataManagementService public subclass Directory
 
 ::method getValue 
-use arg obj 
-field = self~get(obj) 
-if field~isNil = .false then return .nil
-else do 
-    return field~data 
-end 
+    use arg obj 
+    field = self~get(obj) 
+    if field~isNil = .false then return .nil
+    else do 
+        return field~data 
+    end 
 
-    
     
     
 /*
@@ -307,19 +334,20 @@ It has as much of the code in it for dealing with actually drawing what
 should go on the screen as possible, to allow for implementation which is 
 platform specific 
 
-
 */
 
 
 ::class screen public inherit AlarmNotification SanityCheckSupported
-  
+
+
 ::attribute logger
 ::attribute rows
 ::attribute columns 
 ::attribute platform 
 ::attribute running
 ::attribute data
-::constant ansi '1b5b'x /* ansi escape code */ 
+::attribute ScreenCapabilityHighChar /* can we use highchars in the display */ 
+::constant ansi '1b5b'x              /* ansi escape code */ 
  
 ::constant black 0
 ::constant red 1 
@@ -356,18 +384,61 @@ platform specific
   self~recheckScreensize = 30  /* check every 30 seconds on repaint for screen size change */
   self~forceClear = .false 
  
-  if pos("Linux", SysVersion()) <> 0 then do 
-     self~platform=self~isLinux
-  end 
-  if pos("Windows", SysVersion()) <> 0 then do 
-     self~platform =self~isWindows
-  end 
+  self~PlatformCheck
 
   self~getscreensize
   self~setalarm 
   
+::method PlatformCheck 
+    if pos("Linux", SysVersion()) <> 0 then do 
+        self~platform=self~isLinux
+    end 
+    
+    if pos("Windows", SysVersion()) <> 0 then do 
+        self~platform =self~isWindows
+        self~ScreenCapabilityHighChar= .true 
+        'rem' 
+            /* according to Gil Barmwater, there is a problem on Windows
+            with Ansi support which doesnt wake up until it has had 
+            command so on that basis, this might just make it work */
+    end 
+    
+    if self~isLinux = .true then do 
+            /* 
+                Set the screen to run line by line, rather than char by char, used for high latency links
+                and ideal for making a programme which paints the entire screen at a time 
+                function correctly.
+            */ 
+        
+            "stty extproc" 
+            self~ScreenCapabilityHighChar = .true 
+        
+            do line over .SystemQueue~new("echo $TERM") ; nop ; end /* $ */
+                parse var line terminal
+                if upper(terminal) = upper("LINUX") then do 
+                    /* I think we have been opened using a full screen window on a hard tty */
+                    self~recheckScreensize = 60 /* so lets minimise the number of times we check the screen size 
+                                                    to the minimum */ 
+                                                    
+                    self~ScreenCapabilityHighChar = .false      /* full screen linux doesn't like highchar */ 
+                    
+                end 
+    end
+  
 
-::method setalarm 
+  
+::method getEdge 
+    if .SanityChecker~new~isSet(self,"ScreenCapabilityHighChar") = .true then do 
+        edge = d2c(26)
+    end 
+    else do
+        edge ="*"
+    end 
+    
+    return edge 
+  
+  
+::method setalarm unguarded
     if self~running = .false then exit 
     alarm = .alarm~new(1, self)
 
@@ -377,7 +448,7 @@ platform specific
     or given x,y coordinates 
     */ 
   
-  ::method setcursor
+  ::method setcursor 
     use arg obj1, obj2=.Nil
     
     select 
@@ -393,7 +464,7 @@ platform specific
         
     return output
     
-    ::method setcolour
+    ::method setcolour 
     use arg obj 
     output = "" 
     if obj~isInstanceOf(.coloured) then do 
@@ -404,12 +475,10 @@ platform specific
     
     /* 
       relies on ansi colours working 
-      
     */ 
     
     ::method getColourForObject
     use arg obj 
-             
     if .SanityChecker~new~isSet(obj,"fgcolour") = .false then do
         /* default  */ 
         output = self~ansi||"39m"
@@ -429,12 +498,9 @@ platform specific
     else do 
           output = output||self~ansi||"48;5;"||obj~bgcolour||"m" 
     end
-    
-      
-    
     return output
 
-::method getscreensize
+::method getscreensize 
     expose rows columns
 
 	if self~platform = self~isLinux then do 
@@ -449,7 +515,7 @@ platform specific
         end
 
 
-::method triggered
+::method triggered unguarded
     
     t = time(Seconds) 
     if t // self~recheckScreensize = 1 then do  /* the thinking here is getting the screen size seems to cause some flicker */
@@ -465,23 +531,25 @@ platform specific
      say self~data
      self~setalarm
 
-     
-     /* On linux, it seems that Ansi clear works better than SysCls */
+/* This is the code for issuing the instruction to clear the screen.  
+    On linux, it seems that Ansi clear works better than SysCls 
+    So I have defaulted to that 
+*/
 ::method clear
-     self~ansiclear
+     self~ansiclear 
      /* call SysCls  */
  
  /*
  These methods getting the pos and row from a widget in the screen are primarily here so that they can be overridden in the virtual screen 
  */
  
- ::method getPositionRow
- use arg widget
- return widget~row
+ ::method getPositionRow 
+    use arg widget
+    return widget~row
  
  ::method getPositionColumn 
- use arg widget
- return widget~column
+    use arg widget
+    return widget~column
  
  /* 
   Virtual Screen 
@@ -497,55 +565,56 @@ platform specific
  ::constant vRows 25
   
  ::method init 
- use arg logger 
- self~init:super(logger) /* normal init */ 
- self~recheckScreensize = 5  /* set to check screen more frequently for size changes */ 
- self~PlatformCheck /* run platform specific checks - this isolates some platform specific code */ 
+    use arg logger 
+    self~init:super(logger) /* normal init */ 
+    self~recheckScreensize = 5  /* set to check screen more frequently for size changes */ 
+    self~PlatformCheck /* run platform specific checks - this isolates some platform specific code */ 
  
  
  ::method PlatformCheck 
- 
- if self~isLinux = .true then do 
-    /* 
-        Set the screen to run line by line, rather than char by char, used for high latency links
-        and ideal for making a programme which paints the entire screen at a time 
-        function correctly.
-    */ 
- 
-    "stty extproc" 
-   
-    do line over .SystemQueue~new("echo $TERM") ; nop ; end /* $ */
-		parse var line terminal
-		if upper(terminal) = upper("LINUX") then do 
-            /* I think we have been opened using a full screen window on a hard tty */
-            self~recheckScreensize = 60 /* so lets minimise the number of times we check the screen size to the minimum */ 
-             
-		end 
- 
- end 
- if self~isWindows = .true then do 
-    'rem' /* according to Gil Barmwater, there is a problem on Windows with Ansi support 
-            which doesn't wake up until it has had a command 
-            so on that basis, this might just make it work */
- 
- end 
- 
- 
+    self~PlatformCheck:super /* try the supercode first, then do whatever additional checks and modifications we have to do */ 
+
+    
   
- ::method getPositionColumn
- use arg widget
-    wcol = self~getPositionColumn:super(widget) 
-    factor = self~columns / self~vColumns
-    posC = (factor * wcol ) %1 
- return posC
+ /* 
+    This method returns a Postion for the Column based on a virtual screen, unless it is a fixed position widget where it will 
+    use the standard fixed position location 
+ */ 
+  
+ ::method getPositionColumn 
+    use arg widget
+        select 
+            when widget~isInstanceOf(.FixedPositionWidget) = .true then do 
+                posC = self~getPositionColumn:super(widget) /* The posiion returned for fixed position widgets is not adapted */ 
+            end 
+            otherwise do /* for all other widgets, we will move the object as we see apropriate */ 
+                wcol = self~getPositionColumn:super(widget) 
+                factor = self~columns / self~vColumns
+                posC = (factor * wcol ) %1 
+            end
+        end 
+        
+    return posC
  
  
- ::method getPositionRow
- use arg widget
-    wrow = self~getPositionRow:super(widget) 
-    factor = self~rows / self~vRows
-    posR = (factor * wrow)%1  
- return posR 
+ /* 
+    This method returns a Postion for the Row based on a virtual screen, unless it is a fixed position widget where it will 
+    use the standard fixed position location 
+ */ 
+ 
+ ::method getPositionRow 
+    use arg widget
+        select 
+            when widget~isInstanceOf(.FixedPositionWidget) = .true then do 
+                posR = self~getPositionRow:super(widget) 
+            end 
+            otherwise do 
+                wrow = self~getPositionRow:super(widget) 
+                factor = self~rows / self~vRows
+                posR = (factor * wrow)%1  
+            end
+        end 
+    return posR 
 
  
  
@@ -557,16 +626,16 @@ platform specific
   */
  
  
-::class keyboard inherit SanityCheckSupported
+::class keyboard public inherit SanityCheckSupported
 
 ::attribute logger 
 ::attribute running 
 ::attribute wm
 
 ::method add 
-use arg obj 
-if obj~isInstanceOf(.WindowManager) then self~wm = obj
-if obj~isInstanceOf(.Logger) then self~logger = obj
+    use arg obj 
+    if obj~isInstanceOf(.WindowManager) then self~wm = obj
+    if obj~isInstanceOf(.Logger) then self~logger = obj
 
 ::method poll unguarded 
 
@@ -576,7 +645,7 @@ if obj~isInstanceOf(.Logger) then self~logger = obj
     get key from keyboard 
  */ 
  
- k = sysgetkey("noecho")
+    k = sysgetkey("noecho")
  
     /*   now create an object for the key     */ 
  
@@ -782,13 +851,11 @@ if obj~isInstanceOf(.Logger) then self~logger = obj
 
  
  /*
- 
- Class for keys used to handle input 
-
- 
+  Class for keys used to handle input 
  */ 
 
 ::class key public 
+
 ::constant altcode "1B"
 ::constant tabcode "09"
 ::constant spacecode "20" 
@@ -865,7 +932,7 @@ if obj~isInstanceOf(.Logger) then self~logger = obj
     otherwise 
         rc = .false
     end 
-return rc 
+    return rc 
 
 
 
@@ -887,7 +954,7 @@ return rc
 */ 
 ::method detail
     rv = upper(self~value) c2x(upper(self~value)) self~alt self~tab self~space self~bs self~uparrow self~downarrow self~rightarrow self~leftarrow self~backtab self~fn1 self~fn2 self~fn3 self~fn4 self~fn5 self~fn6 self~fn7 self~fn8 self~fn9 self~fn10 self~fn11 self~fn12 
-return rv 
+    return rv 
 
 
 
@@ -947,14 +1014,13 @@ return rv
     self~makewindow 
     self~screen~data = self~makewindow
 
-::method makewindow
-
+::method makewindow 
     d = self~screen~setcolour(self)
     
     /* self~screen~clear */
     
-    edge = d2c(26)
-    edge ="*"
+    edge = self~screen~getEdge()
+       
     
     d = d||self~maketitlebar(edge)
     
@@ -975,12 +1041,12 @@ return rv
         d=d||self~objects~at(i)~draw
     end
 
-return d 
+    return d 
 
 ::method maketitlebar
-use arg edge="*"
-titlebar = self~screen~setcursor(0,1)||center( self~name, self~screen~columns, edge)
-return titlebar 
+    use arg edge="*"
+    titlebar = self~screen~setcursor(0,1)||center( self~name, self~screen~columns, edge)
+    return titlebar 
 
 /*
  Windows have a standard shared "add" method like widgets and WindowManager, for the same reason
@@ -989,14 +1055,14 @@ return titlebar
 */ 
 
 ::method add 
-use arg obj 
-if .SanityChecker~new~check(obj,self) = .false then return
-if obj~isInstanceOf(.widget) then do 
-    self~objects~insert(obj)
-end 
-if obj~isInstanceOf(.keybindable) then do  /* bind against the wm instead - fix for common error */
-    self~wm~add(obj)
-end 
+    use arg obj 
+    if .SanityChecker~new~check(obj,self) = .false then return
+    if obj~isInstanceOf(.widget) then do 
+        self~objects~insert(obj)
+    end 
+    if obj~isInstanceOf(.keybindable) then do  /* bind against the wm instead - fix for common error */
+        self~wm~add(obj)
+    end 
 
 
 
@@ -1008,13 +1074,10 @@ end
 ::attribute logger 
 
 ::method draw 
-super~draw 
-do i = 1 to logger~logdata~allItems
-	self~screen~data(logger~logdata[i])
-end 
-
-
-
+    super~draw 
+    do i = 1 to logger~logdata~allItems
+        self~screen~data(logger~logdata[i])
+    end 
 
 
 
@@ -1026,26 +1089,26 @@ widgets classes
 /* 
  The standard widget class 
 */
-::class widget inherit coloured 
+::class widget public inherit coloured 
 ::attribute row
 ::attribute column
-::attribute data
+::attribute data 
 ::attribute disdata 
 ::attribute validator 
 
 ::method predraw 
-self~disdata = self~data
+    self~disdata = self~data
 
 ::method draw 
-self~predraw 
-return self~disdata 
+    self~predraw 
+    return self~disdata 
 
 
 ::method init 
-expose data row column 
-use arg data, row , column
-self~row = row +1 
-self~column = column +1 
+    expose data row column 
+    use arg data, row , column
+    self~row = row +1 
+    self~column = column +1 
 
 
 /* 
@@ -1082,7 +1145,7 @@ expose length
 use arg data, row, column, length
 self~init:super(data, row, column)
 
-::method predraw
+::method predraw 
 self~disdata = "["||center(self~data,self~length-2," ")||"]"
 
 if self~hasFocus = .true then do 
@@ -1198,7 +1261,7 @@ self~init:super(data,row,column,length)
 */
 
 ::class passwordbox public subclass inputbox 
-::method predraw
+::method predraw 
 self~disdata = left(copies("*",self~data~length),self~length,"_")
 if self~hasFocus = .true then do 
 self~disdata = self~disdata ||" P "
@@ -1207,64 +1270,69 @@ end
 
 /* 
  Slider control 
+ Can be set readonly and used as a % status bar 
 */
 
 ::class slider public subclass inputbox 
 
 ::attribute min
 ::attribute max 
+::attribute readonly 
 
 ::method init 
-use arg data, min, max, row, column, length
-self~validator = .numericvalidator~new
+    use arg data, min, max, row, column, length
+    self~validator = .numericvalidator~new
+    self~readonly = .false
 
-self~min = min 
-self~max = max 
-self~init:super(data, row,column,length) 
-self~checkinrange
+    self~min = min 
+    self~max = max 
+    self~init:super(data, row,column,length) 
+    self~checkinrange
 
 
 ::method sendkey 
-use arg key 
-select 
-    when key~leftarrow = .true | key~value = "-" then do 
-        self~data = self~data - 1 
-    end 
-    when key~rightarrow = .true | key~value = "+" then do 
-        self~data = self~data + 1 
-    end 
-    when key~uparrow = .true then do 
-        self~data = self~data + (((self~max - self~min)*0.1)%1)
-    end 
-    when key~downarrow = .true then do 
-        self~data = self~data - (((self~max - self~min)*0.1)%1)
-    end 
-    when key~bs = .true then do 
-        self~data = self~min
-        self~sendkey:super(key)
-    end 
-    
-    otherwise do
-        self~sendkey:super(key)
-    end 
-end 
+    use arg key 
+        if self~readonly = .false then do 
+            select 
+                when key~leftarrow = .true | key~value = "-" then do 
+                    self~data = self~data - 1 
+                end 
+                when key~rightarrow = .true | key~value = "+" then do 
+                    self~data = self~data + 1 
+                end 
+                when key~uparrow = .true then do 
+                    self~data = self~data + (((self~max - self~min)*0.1)%1)
+                end 
+                when key~downarrow = .true then do 
+                    self~data = self~data - (((self~max - self~min)*0.1)%1)
+                end 
+                when key~bs = .true then do 
+                    self~data = self~min
+                    self~sendkey:super(key)
+                end 
+                
+                otherwise do
+                    self~sendkey:super(key)
+                end 
+            end
+        end 
 
 ::method checkinrange
-if self~data = "" then self~data = self~min
-if self~data < self~min then self~data = self~min
-if self~data > self~max then self~data = self~max
+    if self~data = "" then self~data = self~min
+    if self~data < self~min then self~data = self~min
+    if self~data > self~max then self~data = self~max
 
 ::method predraw 
 
-self~checkinrange
-diff = self~max - self~min 
-valperdiff = self~data / diff
-boxes = (self~length * valperdiff) %1
-self~disdata = left(copies("#",boxes),self~length,".") ||" "|| abs(self~data)
+    self~checkinrange
+    diff = self~max - self~min 
+    valperdiff = self~data / diff
+    boxes = (self~length * valperdiff) %1
+    self~disdata = left(copies("#",boxes),self~length,".") ||" "|| abs(self~data)
 
-if self~hasFocus = .true then do 
-    self~disdata = self~disdata ||" +/- ("||self~min "->" self~max||")" 
-end 
+    if self~hasFocus = .true & self~readonly = .false then do 
+        self~disdata = self~disdata ||" +/- ("||self~min "->" self~max||")" 
+    end 
 
 
 
@@ -1278,29 +1346,29 @@ end
 ::attribute selected
 
 ::method init
-use arg opts, row, column, length
-if .SanityChecker~new~check(opts) = .false then do 
-    self~lackingrequiredobject = .true
-end 
+    use arg opts, row, column, length
+    if .SanityChecker~new~check(opts) = .false then do 
+        self~lackingrequiredobject = .true
+    end 
 
-self~options= .list~new 
-self~options= opts
-self~selected = 0
-self~init:super(self~options~at(0),row, column, length)
+    self~options= .list~new 
+    self~options= opts
+    self~selected = 0
+    self~init:super(self~options~at(0),row, column, length)
 
 ::method predraw 
-self~disdata = ""
-do i = 0 to self~options~items -1 
-  if i = self~selected then do
- 	self~disdata = self~disdata || " X " ||  self~options~at(i) 
-  end 
-  else do 
- 	self~disdata = self~disdata || " . " ||  self~options~at(i)
-  end 
-end 
-if self~hasFocus = .true then do 
-self~disdata = self~disdata ||" * "
-end 
+    self~disdata = ""
+    do i = 0 to self~options~items -1 
+    if i = self~selected then do
+        self~disdata = self~disdata || " X " ||  self~options~at(i) 
+    end 
+    else do 
+        self~disdata = self~disdata || " . " ||  self~options~at(i)
+    end 
+    end 
+    if self~hasFocus = .true then do 
+        self~disdata = self~disdata ||" * "
+    end 
 
 ::method sendkey 
     use arg key 
@@ -1323,8 +1391,8 @@ end
     end 
 
 ::method clear 
-self~selected = 0
-self~data=self~options~at(0)
+    self~selected = 0
+    self~data=self~options~at(0)
 
 
 /* 
@@ -1342,35 +1410,35 @@ normal validator letters and numbers
 ::attribute fieldhelp
 
 ::method init
-use arg fieldhelp=.nil
-self~validkeys = .string~graph || " £" 
-self~fieldhelpstring = "This field is alphanumeric" 
-self~fieldhelp = fieldhelp
+    use arg fieldhelp=.nil
+    self~validkeys = .string~graph || " £" 
+    self~fieldhelpstring = "This field is alphanumeric" 
+    self~fieldhelp = fieldhelp
 
 ::method displayValidatorText 
-if .SanityChecker~new~isSet(self,"fieldhelp") = .true then do 
-     self~fieldhelp~data = self~fieldhelpstring 
-end 
+    if .SanityChecker~new~isSet(self,"fieldhelp") = .true then do 
+        self~fieldhelp~data = self~fieldhelpstring 
+    end 
 
 ::method clearValidatorText 
-if .SanityChecker~new~isSet(self,"fieldhelp") = .true then do 
-     self~fieldhelp~data = ""
-end 
+    if .SanityChecker~new~isSet(self,"fieldhelp") = .true then do 
+        self~fieldhelp~data = ""
+    end 
 
 
 ::method isValidKey
-use arg key 
-self~displayValidatorText 
+    use arg key 
+    self~displayValidatorText 
 
 
-if pos(key~value, self~validkeys) > 0 then return .true 
-else return .false 
+    if pos(key~value, self~validkeys) > 0 then return .true 
+    else return .false 
 
 ::method fieldContentValidate
-use arg widget 
-if widget~isInstanceOf(.validatable) then do 
-    self~validatedata(widget)
-end 
+    use arg widget 
+    if widget~isInstanceOf(.validatable) then do 
+        self~validatedata(widget)
+    end 
 
 
 /*
@@ -1380,10 +1448,10 @@ numeric entry only validator
 ::class numericvalidator public subclass validator
 
 ::method init
-use arg fieldhelp=.nil
-self~init:super(fieldhelp)
-self~validkeys = .string~digit
-self~fieldhelpstring = "This field is numeric only" 
+    use arg fieldhelp=.nil
+    self~init:super(fieldhelp)
+    self~validkeys = .string~digit
+    self~fieldhelpstring = "This field is numeric only" 
 
 
 
@@ -1400,34 +1468,45 @@ self~fieldhelpstring = "This field is numeric only"
 ::attribute hasFocus 
 
 ::method gotFocus 
-self~hasfocus = .true 
-if self~isInstanceOf(.focuscoloured) then do 
-    self~changetoFocusColour()
-end 
+    self~hasfocus = .true 
+    if self~isInstanceOf(.focuscoloured) then do 
+        self~changetoFocusColour()
+    end 
 
-if .SanityChecker~new~isSet(self,"validator") = .true then do 
-        self~validator~displayValidatorText
-end 
-
-
+    if .SanityChecker~new~isSet(self,"validator") = .true then do 
+            self~validator~displayValidatorText
+    end 
 
 ::method lostFocus
-self~hasfocus = .false
-if self~isInstanceOf(.focuscoloured) then do 
-    self~changetoDefaultColour()
-end 
+    self~hasfocus = .false
+    if self~isInstanceOf(.focuscoloured) then do 
+        self~changetoDefaultColour()
+    end 
 
-if .SanityChecker~new~isSet(self,"validator") = .true then do 
-        self~validator~clearValidatorText
-end 
+    if .SanityChecker~new~isSet(self,"validator") = .true then do 
+            self~validator~clearValidatorText
+    end 
 
 
 /* 
-
+    mixin task which will allow validatable field results 
 */ 
 ::class validatable public mixinclass object
 ::attribute valid
 
+
+::class HasMenuItems public mixinclass Object 
+
+::attribute menuitems 
+
+::method initMenuItems
+    self~menuitems = .bag~new()
+
+::method add 
+    use arg obj 
+    if obj~isInstanceOf(.menuitem) = .true then do 
+        self~menuitems~append(obj)
+    end 
 
 
 /*
@@ -1436,33 +1515,34 @@ end
 
 ::class clearable public mixinclass object 
 ::method clear
-self~data = "" 
+    self~data = "" 
 
 
 /*
-allows items to be coloured 
+  allows items to be coloured 
 */
 ::class coloured public mixinclass object
 ::attribute fgcolour
 ::attribute bgcolour 
 
 /* 
- focus colouring
+ allows items to have focus colouring
 */ 
 
 ::class focuscoloured public mixinclass object inherit coloured  
 ::attribute focusfgcolour 
 ::attribute defaultfgcolour 
 
-::method changetoFocusColour
-if self~focusfgcolour != "FOCUSFGCOLOUR" then do 
-self~fgcolour = self~focusfgcolour
-end 
+::method changetoFocusColour 
 
-::method changetoDefaultColour
-if self~defaultfgcolour !=  "DEFAULTFGCOLOUR" then do 
-self~fgcolour = self~defaultfgcolour 
-end 
+    if .SanityChecker~new~isSet(self,"focusfgcolour") = .true then do 
+        self~fgcolour = self~focusfgcolour
+    end 
+
+::method changetoDefaultColour 
+    if .SanityChecker~new~isSet(self,"defaultfgcolour") = .true then do 
+        self~fgcolour = self~defaultfgcolour 
+    end 
 
 
 
@@ -1473,10 +1553,10 @@ end
 ::attribute key
 
 ::method sendkey 
-use arg keypressed 
-if self~key= keypressed then do 
-    self~run()
-end 
+    use arg keypressed 
+    if self~key= keypressed then do 
+        self~run()
+    end 
 
 
 /*
@@ -1485,8 +1565,14 @@ I have no idea what I was thinking when I added this, but I am sure that it will
 
 ::class SanityCheckSupported public mixinclass object
 ::method SanityCheckLog
-use arg msg
-self~logger~log(self " " msg,2)
+    use arg msg
+    self~logger~log(self " " msg,2)
+
+/* 
+Fixed Postion Widget, used to ensure that even if the screen is a virtual screen, that the position of items remains precisely as specified.
+*/
+
+::class FixedPositionWidget public mixinclass object
 
 
 /*
@@ -1497,9 +1583,9 @@ self~logger~log(self " " msg,2)
 
 ::class SystemQueue public subclass RexxQueue
 ::method init
-use strict arg command
-command "| rxqueue"
-self~init:super
+    use strict arg command
+    command "| rxqueue"
+    self~init:super
 
 /* 
  something to make a  crashfile
@@ -1513,7 +1599,6 @@ self~init:super
    use arg stem
    crashfile = "crashfile"
 
-
 ::method unknown
    expose stem crashfile
    use arg msg, text
@@ -1522,7 +1607,7 @@ self~init:super
    stem[index] = text~makeString
     .error~destination
     
-    call lineout(time() " - " msg " " text~makeString, crashfile)
+    
 
 
 
@@ -1537,81 +1622,81 @@ prior to adding them to a window, windowmanager, task etc.
 ::attribute errorreason 
 
 ::method check
-use arg obj, callingobj=.nil
+    use arg obj, callingobj=.nil
 
-self~logger=.logger~new
+    self~logger=.logger~new
 
-if callingobj <> .nil then do 
-    if callingobj~isInstanceOf(.SanityCheckSupported) then do 
-        
+    if callingobj <> .nil then do 
+        if callingobj~isInstanceOf(.SanityCheckSupported) then do 
+            
+            response = self~performcheck(obj)
+            if response = .false then do
+                callingobj~SanityCheckLog("Problem "self~errorcheckcode "with object" obj "called from" callingobj)
+            end
+        end 
+    end
+    else do /* not able to notify back */
         response = self~performcheck(obj)
-        if response = .false then do
-            callingobj~SanityCheckLog("Problem "self~errorcheckcode "with object" obj "called from" callingobj)
-        end
     end 
-end
-else do /* not able to notify back */
-    response = self~performcheck(obj)
-end 
 
-return response
+    return response
 
 ::method performcheck 
-expose checkerrorcode 
-use arg obj 
+    expose checkerrorcode 
+    use arg obj 
 
-if obj~isnil = .true then do 
-    "SanityChecker failed on" obj
-    return .false
-end 
+    if obj~isnil = .true then do 
+        "SanityChecker failed on" obj
+        return .false
+    end 
 
-return .true
+    return .true
 
 /* 
-
+    where was I going here? 
 */ 
 ::method hasValue
-use arg obj, message
-ohm = obj~hasMethod(message)
-temporaryresponse = obj~method(message)
+    use arg obj, message
+    ohm = obj~hasMethod(message)
+    temporaryresponse = obj~method(message)
 
 
 /* 
     Sanity check code to see if attribute is set or has a default value
 */ 
 ::method isSet
-use arg obj, message 
-if message~isNil = .true then do 
-        self~errorreason = "Potential Development issue, nil result coming from attribute has been sent rather than a string with the attribute name to check"
-        rc = .false
-    end
-else do 
-    ohm = obj~hasMethod(message)
-    if ohm = 1 /* method exists */ then do  
-        rfm = obj~send(message)
-        select 
-            when rfm~isNil = .true then do 
-                rc = .false 
-                self~errorreason = "is nil"
-            end 
-            when rfm = UPPER(MESSAGE) then do 
-                rc = .false 
-                self~errorreason = "value is unset and returning with name of a method in class"
-                if message == UPPER(MESSAGE) then do
-                    self~errorreason = "Potential Dev issue, you may have passed method result rather than name of Method"
-                end
-            end 
-        otherwise do
-                rc = .true
-            end 
+    use arg obj, message 
+    if message~isNil = .true then do 
+            self~errorreason = "Potential Development issue, nil result coming from attribute has been sent rather than a string with the attribute name to check"
+            rc = .false
         end
-    end 
-     else do 
-        rc = .false 
-        self~errorreason = "Method does not exist"
+    else do 
+        ohm = obj~hasMethod(message)
+        if ohm = 1 /* method exists */ then do  
+            rfm = obj~send(message)
+            select 
+                when rfm~isNil = .true then do 
+                    rc = .false 
+                    self~errorreason = "is nil"
+                end 
+                when rfm = UPPER(MESSAGE) then do 
+                    rc = .false 
+                    self~errorreason = "value is unset and returning with name of a method in class"
+                    if message == UPPER(MESSAGE) then do
+                        self~errorreason = "Potential Dev issue, you may have passed method result rather than name of Method"
+                    end
+                end 
+            otherwise do
+                    rc = .true
+                end 
+            end
+        end 
+        else do 
+            rc = .false 
+            self~errorreason = "Method does not exist"
+        end
     end
-end
-return rc
+    return rc
 
 
 
@@ -1622,12 +1707,21 @@ return rc
 ::attribute window 
 
 ::method init 
-use arg window 
-self~window= window 
+    use arg window 
+    self~add(window)
 
 ::method run 
 /* override this method */ 
 
+/* 
+  standard add model code 
+*/ 
+
+::method add 
+    use arg obj 
+    if obj~isInstanceOf(.Window) then do 
+        self~window = obj
+    end 
 
 
 /*
@@ -1636,11 +1730,11 @@ self~window= window
 ::class clearEntryTask public subclass Task
 
 ::method run 
-do i = 0 to (self~window~objects~items -1)
-   if self~window~objects~at(i)~isInstanceOf(.clearable) = .true then do 
-	self~window~objects~at(i)~clear
-    end
-end 
+    do i = 0 to (self~window~objects~items -1)
+    if self~window~objects~at(i)~isInstanceOf(.clearable) = .true then do 
+        self~window~objects~at(i)~clear
+        end
+    end 
 
 /* 
  Task to move to a specific window 
@@ -1664,42 +1758,185 @@ end
 */
 ::class goToWindowTaskkey public subclass goToWindowTask inherit keybindable
 
+/* 
 
+A task which puts the current value of all the fields into a file. 
+
+*/ 
 
 
 ::class printAllFieldsToFile public subclass Task 
 
-::method init
-  use arg win
-  self~init:super(win)
-
 ::method run 
-do i over self~window~wm~wmdms~allIndexes
-    call lineout "fields", i " " self~window~wm~wmdms~at(i) " " self~window~wm~wmdms~at(i)~data
-end 
+    do i over self~window~wm~wmdms~allIndexes
+        call lineout "fields.txt", i " " self~window~wm~wmdms~at(i) " " self~window~wm~wmdms~at(i)~data
+    end 
 
+
+/* 
+
+Class to create a help window 
+Text is loaded from a file 
+
+*/ 
 
 
 ::class CreateHelpWindowTask public subclass Task inherit keybindable 
 
-::method init
-  use arg win
-  self~init:super(win)
+::method run 
+    parent = self~window 
+    newwin = .Window~new
+    newwin~name = "Help"
+    i = 1
+    do while lines("helpfile.txt")
+        label.i = .label~new(linein("helpfile.txt"), i+2, 3)
+        newwin~add(label.i) 
+        i=i+1
+    end 
+    button = .Button~new("Close Help",20,33,20)
+    button~add(.goToWindowTask~new(parent,parent))
+    newwin~add(button)
+    parent~wm~add(newwin) 
+    parent~wm~goToWindow(newwin)
+
+    
+/*  
+Run background task 
+*/ 
+
+::class BackgroundTaskStarter public subclass Task inherit keybindable AlarmNotification
+
+::attribute backgroundtaskmanager 
+::attribute backgroundtask
+::attribute widget 
+::attribute progress 
+
+::method init 
+    use arg backgroundtaskmanager, task, win, widget 
+    self~add(backgroundtaskmanager)
+    self~add(task) 
+    self~add(widget)
+    
+    self~init:super(win) 
+    self~progress = .RexxQueue~new()
+    
 
 ::method run 
-parent = self~window 
-newwin = .Window~new
-newwin~name = "Help"
-i = 1
-do while lines("helpfile.txt")
-    label.i = .label~new(linein("helpfile.txt"), i+2, 3)
-    newwin~add(label.i) 
-    i=i+1
-end 
+    Ticker = .ticker~new(0.5,self,"update")
+    "rexx testtask.rex|rxqueue "|| self~progress " &"
+    
+    
+::method triggered 
+    use arg ticker 
+    if self~progress~queued > 0 then do 
+        self~widget~data = self~progress~pull()
+        self~window~draw()
+    end 
+    
+    /* 
+        Add method 
+    */ 
+
+::method add
+    use arg obj 
+    select 
+        when obj~isInstanceOf(.WMBackgroundTaskManager) = .true then do 
+        self~backgroundtaskmanager = obj
+        end 
+        when obj~isInstanceOf(.BackgroundTask) = .true then do 
+            self~backgroundtask~name = obj
+        end 
+        when obj~isInstanceOf(.String) = .true  then do /* name of bg task */ 
+            self~backgroundtask = obj
+        end 
+        when obj~isInstanceOf(.Widget) = .true then do 
+            self~widget = obj
+        end 
+        otherwise do 
+            self~add:super(obj) /* try the super add */ 
+        end 
+    end 
 
 
-button = .Button~new("Close Help",20,33,20)
-button~add(.goToWindowTask~new(parent,parent))
-newwin~add(button)
-parent~wm~add(newwin) 
-parent~wm~goToWindow(newwin)
+::class BackgroundTask public subclass Task 
+    
+    
+    
+/*  
+ task which runs on keypress, updating a value 
+ This is one method of running a task 
+ you will note that testtask.rex just counts slowly 1-100
+*/ 
+
+::class ProgressTask public subclass Task inherit keybindable AlarmNotification
+
+::attribute widget 
+::attribute progress 
+
+::method init 
+    use arg win, widget 
+    self~add(widget)
+    self~init:super(win) 
+    self~add(.RexxQueue~new("prog1234"))
+    
+
+::method run 
+    Ticker = .ticker~new(0.5,self,"update" )
+    "rexx testtask.rex|rxqueue "|| self~progress " &"
+    
+    
+::method triggered 
+    use arg ticker 
+    if self~progress~queued > 0 then do 
+        self~widget~data = self~progress~pull()
+        self~window~draw()
+        
+    end 
+    
+::method add
+    use arg obj 
+    select 
+        when obj~isInstanceOf(.Widget) then do 
+        self~widget = obj
+        end 
+        when obj~isInstanceOf(.RexxQueue) then do 
+            self~progress = obj
+        end 
+        otherwise do 
+            self~add:super(obj) /* try the super add */ 
+        end 
+    end 
+
+::class menu public subclass widget inherit FixedPositionWidget HasMenuItems
+::attribute wm
+
+
+::method init 
+    use arg wm 
+    self~wm = wm 
+
+    self~initMenuItems
+
+    self~init:super("",1,2)
+    self~data = "" 
+
+::method predraw
+    if self~menuitems~at(0)~isNil = .false then do 
+            data = self~menuitems~at(0)~name
+            say data
+        end 
+        
+    self~predraw:super()
+
+
+
+::class menuitem public subclass widget inherit FixedPositionWidget HasMenuItems
+::attribute task 
+
+::method init 
+    use arg name, task
+    self~data = name 
+    self~task = task 
+    self~initMenuItems
+
+
