@@ -372,7 +372,8 @@ platform specific
 
 
 ::method ansiclear
-  say self~ansi||'2J'
+  say self~ansi||'2J' /* clear */ 
+  say self~ansi||'?25l' /* hide cursor */ 
 
 ::constant isLinux linux
 ::constant isWindows windows 
@@ -1040,6 +1041,8 @@ platform specific
         d=d||self~screen~setcursor(self~objects~at(i))
         d=d||self~objects~at(i)~draw
     end
+    
+    d=d||self~screen~setcursor(self~wm~activeitem) /* moves the cursor at least to the correct line */ 
 
     return d 
 
