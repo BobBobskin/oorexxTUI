@@ -1,7 +1,7 @@
 /* 
 
  Text Mode UI
- v0.13
+ v0.14
  Tom Dyer flicker@anduin.net
  2020
  
@@ -159,14 +159,33 @@ Sets up a logger, and some necessary lists
  
     if self~running = .false then do 
         if .SanityChecker~new~isSet(self,"screen") = .true then do 
+        
+            self~PlatformSpecificShutdownTasks
+            
+        end 
+    end
+
+    
+    
+::method PlatformSpecificShutdownTasks
+    if .SanityChecker~new~isSet(self,"screen") = .true then do 
+        if self~screen~platform = self~screen~isWindows then do 
+            /* returnBuffersize */
+            call sysTextScreenSize "BufferSize", self~screen~winbufLines, self~screen~winbufCols
+        
+        
+        end 
+        if self~screen~platform = self~screen~isLinux then do 
             self~logger~log("forceWMShutdown has screen",1)
             pid=SysQueryProcess("pid")
             self~logger~log("Killing pid" pid,1)
             Say "Forcing Kill on" pid 
             "kill -9" pid
         end 
-    end
- 
+    
+    end 
+
+
  
  ::method addKeyBindableTask 
     use arg keyBindableTask 
@@ -347,6 +366,9 @@ platform specific
 ::attribute running
 ::attribute data
 ::attribute ScreenCapabilityHighChar /* can we use highchars in the display */ 
+::attribute winbufLines /* used to allow compatibility with resetting the screen in Windows */
+::attribute winbufCols /* used to allow compatibility with resetting the screen in Windows */
+
 ::constant ansi '1b5b'x              /* ansi escape code */ 
  
 ::constant black 0
@@ -402,9 +424,21 @@ platform specific
             /* according to Gil Barmwater, there is a problem on Windows
             with Ansi support which doesnt wake up until it has had 
             command so on that basis, this might just make it work */
+            
+        parse value SysTextScreenSize("MaxWindowSize") with maxLines maxCols
+        parse value SysTextScreenSize("BufferSize"   ) with self~winbufLines self~winbufCols
+        parse value SysTextScreenSize("WindowRect"   ) with offLines offCols winLines winCols
+        
+        /* buffer to window */
+        tmpLines=winLines-offLines+1
+        tmpCols =winCols -offCols+1
+        
+        call sysTextScreenSize "BufferSize", tmpLines, tmpCols
+        
+        
     end 
     
-    if self~isLinux = .true then do 
+    if self~platform= self~isLinux then do 
             /* 
                 Set the screen to run line by line, rather than char by char, used for high latency links
                 and ideal for making a programme which paints the entire screen at a time 
@@ -430,10 +464,12 @@ platform specific
   
 ::method getEdge 
     if .SanityChecker~new~isSet(self,"ScreenCapabilityHighChar") = .true then do 
-        edge = d2c(26)
-    end 
-    else do
-        edge ="*"
+        if self~ScreenCapabilityHighChar = .true then do 
+                edge = d2c(26)
+            end 
+            else do
+                edge ="*"
+            end 
     end 
     
     return edge 
@@ -1363,14 +1399,14 @@ end
     self~disdata = ""
     do i = 0 to self~options~items -1 
     if i = self~selected then do
-        self~disdata = self~disdata || " X " ||  self~options~at(i) 
+        self~disdata = self~disdata || "X " ||  self~options~at(i) ||" "  
     end 
     else do 
-        self~disdata = self~disdata || " . " ||  self~options~at(i)
+        self~disdata = self~disdata || ". " ||  self~options~at(i) ||" " 
     end 
     end 
     if self~hasFocus = .true then do 
-        self~disdata = self~disdata ||" * "
+        self~disdata = self~disdata ||"*"
     end 
 
 ::method sendkey 

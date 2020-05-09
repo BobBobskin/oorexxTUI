@@ -51,22 +51,22 @@ version 0.1
   */
  
  
- label1 = .label~new("this is a label",2,3) 
- label2 = .label~new("a second label", 3,3) 
- input1 = .inputbox~new("", 2, 20, 30)
+ label1 = .label~new("this is a label",2,2) 
+ label2 = .label~new("a second label", 3,2) 
+ input1 = .inputbox~new("", 2, 18, 30)
  input1~fixedlength=.false
  input1~showlength=.true
  
  input1~focusfgcolour = .screen~brightgreen
  
- input2 = .inputbox~new("", 3, 20, 30)
+ input2 = .inputbox~new("", 3, 18, 30)
  input2~showlength=.true
  input2~fixedlength=.true
  
  input2~fgcolour = .screen~green
  input2~focusfgcolour = .screen~brightyellow
  
- input3 = .passwordbox~new("", 4, 20, 30)
+ input3 = .passwordbox~new("", 4, 18, 30)
  input3~fgcolour = .screen~green
  input3~focusfgcolour = .screen~brightgreen
 
@@ -74,14 +74,13 @@ version 0.1
  radiooptions~insert("Free like beer")
  radiooptions~insert( "Free like speech") 
  radiooptions~insert("Freedom to bare arms") 
- input4 = .radiobox~new(radiooptions, 5,20,40)
+ input4 = .radiobox~new(radiooptions, 5,18,40)
  input4~fgcolour = .screen~yellow
-
- fieldhelplabel = .label~new("** I am sure I am not here **",15,20) 
+ fieldhelplabel = .label~new("** I am sure I am not here **",15,18) 
  
  
- input1s2 = .inputbox~new("",2, 20, 30)
- input2s2 = .searchbox~new("", 3, 20, 30)
+ input1s2 = .inputbox~new("",2, 18, 30)
+ input2s2 = .searchbox~new("", 3, 18, 30)
  input2s2~list=.list~new()
  input2s2~list~insert("Dasha")
  input2s2~list~insert("Dusy")
@@ -95,9 +94,9 @@ version 0.1
  input2s2~fgcolour=.screen~brightyellow
  
  
- sliders2 = .slider~new(10,5,400,4,20,30) /* initial value 10, range 5-400 */
+ sliders2 = .slider~new(10,5,400,4,18,30) /* initial value 10, range 5-400 */
  
- sliders2ro = .slider~new(0,0,100,6,20,50)  /* a read only slider */
+ sliders2ro = .slider~new(0,0,100,6,18,50)  /* a read only slider */
  sliders2ro~readonly=.true
  say sliders2ro~data 
    
