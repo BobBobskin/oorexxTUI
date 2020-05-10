@@ -143,7 +143,7 @@ version 0.1
  */
  
  okButton= .button~new("OK",20,20,25)
- okButton~task=.goToWindowTask~new(win,1)
+ okButton~add(.goToWindowTask~new(win,1))
  
  
  okButton2= .button~new("OK",20,20,25)

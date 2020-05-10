@@ -247,7 +247,7 @@ Sets up a logger, and some necessary lists
             end
     end 
     
-    if self~focusableitems~items > 1 then do
+    if self~focusableitems~items >= 1 then do
         self~focusableitems~at(0)~hasFocus = .true 
         self~activeitem= self~focusableitems~at(0)
     end 
@@ -289,31 +289,36 @@ Sets up a logger, and some necessary lists
     use arg key 
     self~logger~log("WM - key pressed was" key~detail,0)
 
-    select 
-        when key~altcmd= .true & upper(key~value) = "X" then do /* Alt X shutdown key */ 
-            self~keyboard~running= .false
-            self~screen~running = .false 
-            self~logger~log("shutdown called",0)
-        end
-        when key~altcmd= .true & upper(key~value) = "R" then do /* Alt R redraw */
-            self~drawwindows 
-            self~screen~draw
-        end
-        when key~tab=.true then do /* Tab next field */ 
-            self~nextFocus
-        end 
-        when key~altcmd= .true then do /* any other alt key is sent to keybindable tasks */
-            /* 
-            send it to anything with global keybindability on alt 
-            */ 
-            do i = 0 to self~keybindabletasks~items -1 
-                self~logger~log("WM sending keystroke to keybindabletask",2)
-                self~keybindabletasks~at(i)~sendkey(key)
+        select 
+            when key~altcmd= .true & upper(key~value) = "X" then do /* Alt X shutdown key */ 
+                self~keyboard~running= .false
+                self~screen~running = .false 
+                self~logger~log("shutdown called",0)
+            end /* end when */
+            when key~altcmd= .true & upper(key~value) = "R" then do /* Alt R redraw */
+                self~drawwindows 
+                self~screen~draw
+            end /* end when */
+            when key~tab=.true then do /* Tab next field */ 
+                self~nextFocus
+            end /* end when */
+            when key~altcmd= .true then do /* any other alt key is sent to keybindable tasks */
+                /* 
+                send it to anything with global keybindability on alt 
+                */ 
+                do i = 0 to self~keybindabletasks~items -1 
+                    self~logger~log("WM sending keystroke to keybindabletask",2)
+                    self~keybindabletasks~at(i)~sendkey(key)
+                end 
+            end /* end when */
+            otherwise do /* if the sanity checker says we have an active item, let's send the character */ 
+                if .SanityChecker~new~isSet(self,"activeitem") = .true then do 
+                        self~activeitem~sendkey(key)
+                    end /* end if do */ 
+                end /* end otherwise */ 
             end 
-        end 
-        otherwise 
-                self~activeitem~sendkey(key)
-        end
+        
+    
         
         /* 
         then anything else to the active item on screen
@@ -347,6 +352,12 @@ Sets up a logger, and some necessary lists
         return field~data 
     end 
 
+    
+::method hasField
+    use arg obj 
+    field = self~get(obj) 
+    if field~isNil = .true then return .false 
+    else return .true 
     
     
 /*
@@ -1087,7 +1098,16 @@ platform specific
 
 ::method maketitlebar
     use arg edge="*"
-    titlebar = self~screen~setcursor(0,1)||center( self~name, self~screen~columns, edge)
+    
+    if .SanityChecker~new~isSet(self,"name") = .true then do 
+            name = self~name 
+        end 
+    else do 
+            name = "" /* If for some reason the window has not been given a name, set it to blank  */ 
+        end 
+    
+    titlebar = self~screen~setcursor(0,1)||center( name, self~screen~columns, edge)
+    
     return titlebar 
 
 /*
@@ -1183,27 +1203,96 @@ widgets classes
 ::attribute task 
 
 ::method init 
-expose length
-use arg data, row, column, length
-self~init:super(data, row, column)
+    expose length
+    use arg data, row, column, length
+    self~init:super(data, row, column)
 
 ::method predraw 
-self~disdata = "["||center(self~data,self~length-2," ")||"]"
+    self~disdata = "["||center(self~data,self~length-2," ")||"]"
 
-if self~hasFocus = .true then do 
-self~disdata = self~disdata ||" * "
-end
+    if self~hasFocus = .true then do 
+    self~disdata = self~disdata ||" * "
+    end
 
 ::method sendkey 
-self~task~run
+    use arg key 
+    if .SanityChecker~new~isSet(self,"validator") = .true then do
+        if self~validator~isValidKey(key) = .true then do 
+            self~task~run
+        end 
+        else do
+            nop     /* not valid key */ 
+        end
+    
+    end 
+    else do 
+        self~task~run
+    end 
 
 ::method add 
 use arg obj 
-if obj~isInstanceOf(.Task) then do 
-    self~task = obj
-end 
-self~add:super(obj) 
+    if obj~isInstanceOf(.Task) = .true then do 
+        self~task = obj
+    end 
+    self~add:super(obj) 
 
+
+
+
+/* 
+
+A button which when clicked sends the specific message requested to the specific class which has been set 
+with an integrated task 
+
+*/ 
+
+::class ButtonSendMessage public subclass button 
+::attribute TargetForMessage 
+::attribute MessageToSend 
+
+::method init 
+use arg data, row, column, length, obj1=.nil, obj2=.nil, obj3=.nil
+    
+    self~add(obj1)
+    self~add(obj2)
+    self~add(obj3)
+
+    self~init:super(data, row, column, length)
+
+
+::method add 
+    use arg obj 
+    if obj = .nil then do 
+        nop
+    end
+    else do 
+         select 
+                when obj~isInstanceOf(.String) = .true then do /* normally strings are treated differently, however here we expect strings to be the message which will be sent to the object */ 
+                    self~MessageToSend = obj
+                end 
+                when obj~isInstanceOf(.WindowManager) = .true then do /* normally strings are treated differently, however here we expect strings to be the message which will be sent to the object */ 
+                    self~TargetForMessage = obj
+                    self~add:super(obj)
+                end 
+                when obj~isInstanceOf(.Window) = .true then do /* normally strings are treated differently, however here we expect strings to be the message which will be sent to the object */ 
+                    self~TargetForMessage = obj
+                    self~add:super(obj)
+                end 
+                
+                otherwise do 
+                    self~add:super(obj)
+                    end
+                end 
+    end 
+
+    
+    /* this is the bit which does something when it is pressed and in this case, it will fire the message to the */ 
+::method sendkey
+    use arg key 
+    self~add(.sendMessageTask~new(self~MessageToSend,self~TargetForMessage))
+    
+    /* having added a task, with the suitable instructions, we'll now run the super which will run that task like any other task  */
+    self~sendkey:super(key)
 
 
 /* 
@@ -1216,42 +1305,42 @@ The standard Input box
 ::attribute showlength 
 
 ::method init
-expose data row column length
-use arg data, row, column, length 
-self~validator = .validator~new() /* default validator used */
-self~fixedlength = .nil
-self~init:super(data, row, column) 
+    expose data row column length
+    use arg data, row, column, length 
+    self~validator = .validator~new() /* default validator used */
+    self~fixedlength = .nil
+    self~init:super(data, row, column) 
  
 ::method predraw 
-self~disdata = left(self~data,self~length,"_") 
-if self~hasFocus = .true then do 
-    self~disdata = self~disdata ||" *"
-end 
-
-if self~showlength= .true then do 
-    if self~fixedlength = .true then do 
-    self~disdata = self~disdata length(self~data)||"/"||self~length
+    self~disdata = left(self~data,self~length,"_") 
+    if self~hasFocus = .true then do 
+        self~disdata = self~disdata ||" *"
     end 
-    else self~disdata = self~disdata length(self~data) 
-end 
+
+    if self~showlength= .true then do 
+        if self~fixedlength = .true then do 
+        self~disdata = self~disdata length(self~data)||"/"||self~length
+        end 
+        else self~disdata = self~disdata length(self~data) 
+    end 
 
 ::method sendkey 
-use arg key
-if key~bs = .true & length(self~data ) > 0  then do
-	self~data = left(self~data, length(self~data)-1 )
-end 
-else do
-  if .SanityChecker~new~isSet(self,"validator") = .true then do 
-  	if self~validator~isValidKey(key) = .false then key~value = ""
-  end 
-  /* 
-   can't type too much in a fixed length field 
-  */ 
-   if self~fixedlength = .true then do 
-    if length(self~data)+1 > self~length then key~value = ""
-   end 
-   self~data = self~data||key~value
-end 
+    use arg key
+    if key~bs = .true & length(self~data ) > 0  then do
+        self~data = left(self~data, length(self~data)-1 )
+    end 
+    else do
+    if .SanityChecker~new~isSet(self,"validator") = .true then do 
+        if self~validator~isValidKey(key) = .false then key~value = ""
+    end 
+    /* 
+    can't type too much in a fixed length field 
+    */ 
+    if self~fixedlength = .true then do 
+        if length(self~data)+1 > self~length then key~value = ""
+    end 
+    self~data = self~data||key~value
+    end 
 
 /*
  Search box, allows you to provide a list of potential 
@@ -1263,10 +1352,10 @@ end
 ::attribute matching 
 
 ::method init
-use arg data, row, column, length 
-self~keyed=""
-self~matching=0
-self~init:super(data,row,column,length)
+    use arg data, row, column, length 
+    self~keyed=""
+    self~matching=0
+    self~init:super(data,row,column,length)
 
 ::method sendkey
     use arg key 
@@ -1304,10 +1393,10 @@ self~init:super(data,row,column,length)
 
 ::class passwordbox public subclass inputbox 
 ::method predraw 
-self~disdata = left(copies("*",self~data~length),self~length,"_")
-if self~hasFocus = .true then do 
-self~disdata = self~disdata ||" P "
-end
+    self~disdata = left(copies("*",self~data~length),self~length,"_")
+    if self~hasFocus = .true then do 
+    self~disdata = self~disdata ||" P "
+    end
 
 
 /* 
@@ -1452,9 +1541,17 @@ normal validator letters and numbers
 ::attribute fieldhelp
 
 ::method init
-    use arg fieldhelp=.nil
+    use arg fieldhelp=.nil, fieldhelpstring=.nil
+    
+    self~add(fieldhelp)
+    self~add(fieldhelpstring)
+
     self~validkeys = .string~graph || " £" 
-    self~fieldhelpstring = "This field is alphanumeric" 
+        
+    if .SanityChecker~new~isSet(self,"fieldhelpstring") = .false then do 
+        self~fieldhelpstring = "This field is alphanumeric" 
+    end 
+    
     self~fieldhelp = fieldhelp
 
 ::method displayValidatorText 
@@ -1466,6 +1563,21 @@ normal validator letters and numbers
     if .SanityChecker~new~isSet(self,"fieldhelp") = .true then do 
         self~fieldhelp~data = ""
     end 
+    
+::method add 
+use arg obj
+    select 
+        when obj~isInstanceOf(.Label) = .true then do 
+            self~fieldhelp = obj
+        end 
+        when obj~isInstanceOf(.String) = .true then do 
+            self~fieldhelpstring = obj
+        end 
+    otherwise do 
+    
+        end 
+    end 
+    
 
 
 ::method isValidKey
@@ -1493,9 +1605,69 @@ numeric entry only validator
     use arg fieldhelp=.nil
     self~init:super(fieldhelp)
     self~validkeys = .string~digit
-    self~fieldhelpstring = "This field is numeric only" 
+    self~add("This field is numeric only") 
 
 
+/* 
+    a validator which triggers so long as fields are not empty 
+*/ 
+    
+::class FieldHasValue public subclass Validator 
+::attribute field
+::attribute wmdms 
+
+::method isValidKey
+    use arg key 
+    
+    if wmdms~getValue(self~field).isNil = .false then return .true 
+    else return .false 
+    
+
+
+::method init 
+    use arg field, fieldhelp=.nil, fieldhelpstring=.nil, wmdms=.nil 
+    self~add(wmdms)
+    self~add(field)
+    self~add(fieldhelp)
+    self~add(fieldhelpstring)
+
+
+::method add 
+    use arg obj
+    
+    select 
+        when obj~isInstanceOf("WMDataManagementService") = .true then do 
+            self~wmdms = obj 
+        end 
+        when obj~isInstanceOf("inputbox") = .true then do 
+            self~field = obj                                            /* it is the field we are supposed to be validating */ 
+        end 
+        
+        when obj~isInstanceOf("String") = .true then do                 /* If the person has sent a string*/ 
+        
+            if .SanityChecker~new~isSet(self,"wmdms") = .true then do   /* qand if we can query it against the wmdms */ 
+                if self~wmdms~hasField(obj) = .true then do             /* then if the string is a field name we can treat it as the field*/ 
+                    self~field = obj 
+                end 
+                else do 
+                    self~add:super(obj)                                 /* otherwise the standard code which will make it the error message */ 
+                end 
+            end 
+        end 
+     
+        otherwise do 
+            self~add:super(obj)
+        end 
+    end 
+    
+     
+    
+    
+        
+
+
+
+    
 
 
 /*
@@ -1747,10 +1919,12 @@ prior to adding them to a window, windowmanager, task etc.
 */ 
 ::class Task public
 ::attribute window 
+::attribute wm
 
 ::method init 
-    use arg window 
-    self~add(window)
+    use arg obj1=.nil, obj2=.nil
+    self~add(obj1)
+    self~add(obj2)
 
 ::method run 
 /* override this method */ 
@@ -1761,8 +1935,16 @@ prior to adding them to a window, windowmanager, task etc.
 
 ::method add 
     use arg obj 
-    if obj~isInstanceOf(.Window) then do 
-        self~window = obj
+    select
+        when obj~isInstanceOf(.Window) = .true then do 
+            self~window = obj
+        end 
+        when obj~isInstanceOf(.WindowManager) = .true then do 
+            self~wm = obj
+        end 
+        otherwise do 
+            nop
+        end 
     end 
 
 
@@ -1814,6 +1996,97 @@ A task which puts the current value of all the fields into a file.
         call lineout "fields.txt", i " " self~window~wm~wmdms~at(i) " " self~window~wm~wmdms~at(i)~data
     end 
 
+    
+/* 
+    A task which fires a specific message to a specific object 
+*/
+
+
+::class sendMessageTask public subclass Task 
+
+::attribute TargetForMessage
+::attribute MessageToSend
+::attribute widget 
+::attribute wmdms 
+
+   
+::method init 
+    use arg obj1, obj2=.nil, obj3=.nil, obj4=.nil, obj5=.nil 
+    
+    self~init:super(obj1,obj2)
+    self~add(obj3)
+    self~add(obj4)
+    self~add(obj5)
+   
+::method run  
+    if .SanityChecker~new~isSet(self,"TargetForMessage") = .true & .SanityChecker~new~isSet(self,"MessageToSend") = .true then do 
+        forward to(self~TargetForMessage) message(self~MessageToSend)
+    end 
+    
+/* our add code, based upon the instance */ 
+::method add 
+    use arg obj
+    Select 
+        when obj~isInstanceOf(.Window) = .true then do 
+            self~wm = obj
+        end 
+        when obj~isInstanceOf(.WindowManager) = .true then do
+            self~window= obj
+        end 
+        when obj~isInstanceOf(.Widget) = .true then do
+            self~widget= obj
+        end 
+        when obj~isInstanceOf(.String) = .true then do /* if it's a string we will treat it as the method to be called */ 
+            self~MessageToSend= obj
+        end 
+        when obj~isInstanceOf(.WMDataManagementService) = .true then do
+            self~WMDMS= obj
+        end 
+        otherwise do 
+            nop
+        end 
+    end
+    
+    self~guessTarget()
+
+    
+/* 
+    sets the target to a specific target 
+    used both internally, and if we need to specify the target for some reason. 
+*/ 
+::method setTarget 
+    use arg obj
+    self~TargetForMessage = obj
+
+
+
+
+    /* 
+        Try to determine guess the target for the message
+    */ 
+::method guessTarget 
+    if .SanityChecker~new~isSet(self,"TargetForMessage") = .false then do /* if we don't have a fixed target */ 
+    /* we are going to run through the items, and find one which has that message as a valid message */
+        select 
+            when .SanityChecker~new~isSet(self,"wm") = .true then do
+                if wm~hasMethod(self~MessageToSend) = .true then self~setTarget(self~wm)
+            end 
+            when .SanityChecker~new~isSet(self,"window") = .true then do
+                if self~window~hasMethod(self~MessageToSend) = .true then self~setTarget(self~window)
+            end 
+            when .SanityChecker~new~isSet(self,"wmdms") = .true then do
+                if self~wmdms~hasMethod(self~MessageToSend) = .true then self~setTarget(self~wmdms)
+            end 
+            when .SanityChecker~new~isSet(self,"widget") = .true then do
+                if self~widget~hasMethod(self~MessageToSend) = .true then self~setTarget(self~widget)
+            end 
+        otherwise do 
+                nop
+            end 
+        end 
+    end 
+
+    
 
 /* 
 
