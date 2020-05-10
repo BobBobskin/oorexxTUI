@@ -246,8 +246,11 @@ Sets up a logger, and some necessary lists
             self~focusableitems~insert(self~window~at(self~activewindow)~objects~at(i))
             end
     end 
-    self~focusableitems~at(0)~hasFocus = .true 
-    self~activeitem= self~focusableitems~at(0)
+    
+    if self~focusableitems~items > 1 then do
+        self~focusableitems~at(0)~hasFocus = .true 
+        self~activeitem= self~focusableitems~at(0)
+    end 
   
     if .SanityChecker~new~isSet(self~activeitem,"validator") then do 
         self~activeitem~validator~displayValidatorText
@@ -1960,6 +1963,7 @@ Run background task
     self~data = "" 
 
 ::method predraw
+
     if self~menuitems~at(0)~isNil = .false then do 
             data = self~menuitems~at(0)~name
             say data
